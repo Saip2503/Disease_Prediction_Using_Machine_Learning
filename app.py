@@ -3,10 +3,8 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from collections import Counter
-
-import pandas as pd
-import numpy as np
 import pickle
+import joblib
 
 # ================== Load Files =====================
 # Load symptom severity
@@ -37,25 +35,46 @@ with open("encoder.pkl", "rb") as f:
 # Load columns
 X = pd.DataFrame(columns=all_symptoms)
 
-# --- Prediction Function ---
-def predict_multiple_diseases(input_symptoms):
+# 🩺 Set page config
+st.set_page_config(page_title="Disease Prediction App", page_icon="🩺")
+
+st.title("🩺 Disease Prediction from Symptoms")
+
+# ✅ SYMPTOM LIST - Add your list of symptoms here
+SYMPTOM_LIST = sorted([
+    'itching', 'skin rash', 'nodal skin eruptions', 'continuous sneezing', 'shivering',
+    'chills', 'joint pain', 'stomach pain', 'acidity', 'ulcers on tongue', 'muscle wasting',
+    'vomiting', 'burning micturition', 'spotting urination', 'fatigue', 'weight gain',
+    'anxiety', 'cold hands and feets', 'mood swings', 'weight loss', 'restlessness',
+    'lethargy', 'patches in throat', 'irregular sugar level', 'cough', 'high fever',
+    'sunken eyes', 'breathlessness', 'sweating', 'dehydration', 'indigestion'
+    # 👉🏻 Add more symptoms based on your dataset!
+])
+
+# 👉🏻 Multi-select symptom input
+selected_symptoms = st.multiselect(
+    "Select your Symptoms:",
+    SYMPTOM_LIST
+)
+
+def predict_multiple_diseases(selected_symptoms):
     input_list = [0] * len(symptom_index)
-    symptom_list = [s.strip().lower().replace(" ", "_") for s in input_symptoms.split(",")]
-
-    for s in symptom_list:
-        if s in symptom_index:
-            input_list[symptom_index[s]] = symptom_severity.get(s.replace("_", " "), 0)
-
+    
+    for s in selected_symptoms:
+        s_clean = s.lower().strip().replace(" ", "_")
+        if s_clean in symptom_index:
+            input_list[symptom_index[s_clean]] = symptom_severity.get(s_clean.replace("_", " "), 0)
+    
     input_df = pd.DataFrame([input_list], columns=X.columns)
-
+    
     pred_rf = encoder.classes_[rf_model.predict(input_df)[0]]
     pred_nb = encoder.classes_[nb_model.predict(input_df)[0]]
     pred_svm = encoder.classes_[svm_model.predict(input_df)[0]]
-
+    
     all_preds = [pred_rf, pred_nb, pred_svm]
     prediction_counts = Counter(all_preds)
     top_predictions = prediction_counts.most_common(3)
-
+    
     result = []
     for disease, count in top_predictions:
         precautions = precaution_dict.get(disease, ["Not available"] * 4)
@@ -64,29 +83,17 @@ def predict_multiple_diseases(input_symptoms):
             "Votes": count,
             "Precautions": precautions
         })
-
+    
     return result
 
-# --- Streamlit UI ---
-st.set_page_config(page_title="Disease Prediction from Symptoms", page_icon="🩺", layout="wide")
-
-st.title("🩺 Disease Prediction System")
-st.markdown("Enter your symptoms below, separated by commas.")
-
-symptom_input = st.text_input("Symptoms (comma separated)", placeholder="e.g., itching, skin rash, nodal skin eruptions")
-
-if st.button("Predict"):
-    if symptom_input:
-        results = predict_multiple_diseases(symptom_input)
-
+if st.button("Predict Disease"):
+    if selected_symptoms:
+        results = predict_multiple_diseases(selected_symptoms)
         for idx, res in enumerate(results):
             st.subheader(f"Prediction #{idx+1}: {res['Disease']}")
             st.write(f"Votes: {res['Votes']} / 3")
-            st.markdown("**Recommended Precautions:**")
-            for p in res["Precautions"]:
+            st.markdown("**Precautions:**")
+            for p in res['Precautions']:
                 st.write(f"- {p}")
     else:
-        st.warning("⚠️ Please enter some symptoms.")
-
-st.markdown("---")
-st.caption("Made with ❤️ using Streamlit")
+        st.warning("Please select at least one symptom!")
