@@ -6,113 +6,87 @@ import numpy as np
 
 # ================== Load Models and Data =====================
 
-# Load symptom severity
-severity_df = pd.read_csv("Symptom-severity.csv")
-severity_df.columns = severity_df.columns.str.strip().str.replace('\ufeff', '')
-symptom_severity = dict(zip(severity_df['Symptom'].str.lower().str.strip(), severity_df['weight']))
+@st.cache_resource(show_spinner=False)
+def load_models():
+    with open("svm_model.pkl", "rb") as f:
+        svm_model = pickle.load(f)
+    with open("nb_model.pkl", "rb") as f:
+        nb_model = pickle.load(f)
+    with open("rf_model.pkl", "rb") as f:
+        rf_model = pickle.load(f)
+    with open("encoder.pkl", "rb") as f:
+        encoder = pickle.load(f)
+    with open("symptom_index.pkl", "rb") as f:
+        symptom_index = pickle.load(f)
+    with open("precaution_dict.pkl", "rb") as f:
+        precaution_dict = pickle.load(f)
+    return svm_model, nb_model, rf_model, encoder, symptom_index, precaution_dict
 
-# Load precautions
-precaution_df = pd.read_csv("symptom_precaution.csv").fillna("")
-precaution_df.columns = precaution_df.columns.str.strip().str.replace('\ufeff', '')
-precaution_dict = {
-    row["Disease"]: [row["Precaution_1"], row["Precaution_2"], row["Precaution_3"], row["Precaution_4"]]
-    for _, row in precaution_df.iterrows()
-}
+@st.cache_data(show_spinner=False)
+def load_severity():
+    severity_df = pd.read_csv("Symptom-severity.csv")
+    severity_df.columns = severity_df.columns.str.strip().str.replace('\ufeff', '')
+    return dict(zip(severity_df['Symptom'].str.lower().str.strip(), severity_df['weight']))
 
-# Load the trained models and encoder
-with open("svm_model.pkl", "rb") as f:
-    svm_model = pickle.load(f)
-with open("nb_model.pkl", "rb") as f:
-    nb_model = pickle.load(f)
-with open("rf_model.pkl", "rb") as f:
-    rf_model = pickle.load(f)
-with open("encoder.pkl", "rb") as f:
-    encoder = pickle.load(f)
-with open("symptom_index.pkl", "rb") as f:
-    symptom_index = pickle.load(f)
-with open("precaution_dict.pkl", "rb") as f:
-    precaution_dict = pickle.load(f)
+svm_model, nb_model, rf_model, encoder, symptom_index, precaution_dict = load_models()
+symptom_severity = load_severity()
 
-# ================== Streamlit UI =====================
+# ================== UI Setup =====================
+st.set_page_config(page_title="🩺 Disease Predictor", page_icon="🧬", layout="centered")
+st.title("🩺 Disease Prediction from Symptoms")
 
-st.set_page_config(page_title="Disease Prediction App", page_icon="🩺", layout="centered")
-st.title("🩺 **Disease Prediction from Symptoms**")
-
-# Description of the app
 st.markdown("""
-    This app helps in predicting potential diseases based on the symptoms you provide.
-    You can select multiple symptoms from the dropdown, and the app will return the top diseases along with recommended precautions.
+This app predicts potential diseases based on symptoms you select.
+Choose symptoms from the dropdown below to get possible diagnoses and recommended precautions.
 """)
 
-# Dropdown list for symptom selection
-# Assuming 'all_symptoms' is the list of all available symptoms from the dataset
-all_symptoms = sorted([
-    'itching', 'skin rash', 'nodal skin eruptions', 'continuous sneezing', 'shivering',
-    'chills', 'joint pain', 'stomach pain', 'acidity', 'ulcers on tongue', 'muscle wasting',
-    'vomiting', 'burning micturition', 'spotting urination', 'fatigue', 'weight gain',
-    'anxiety', 'cold hands and feets', 'mood swings', 'weight loss', 'restlessness',
-    'lethargy', 'patches in throat', 'irregular sugar level', 'cough', 'high fever',
-    'sunken eyes', 'breathlessness', 'sweating', 'dehydration', 'indigestion'
-])
+# ================== Symptom Selection =====================
+all_symptoms = sorted(symptom_index.keys())
+display_symptoms = [s.replace("_", " ").title() for s in all_symptoms]
+selected_display = st.multiselect("Select Symptoms:", display_symptoms)
+selected_symptoms = [s.lower().replace(" ", "_") for s in selected_display]
 
-selected_symptoms = st.multiselect(
-    "Select Symptoms (Multiple can be selected):", 
-    all_symptoms, 
-    key="symptoms"
-)
-
-# Prediction function
+# ================== Prediction Logic =====================
 def predict_multiple_diseases(selected_symptoms):
     input_list = [0] * len(symptom_index)
-    symptom_list = [s.strip().lower().replace(" ", "_") for s in selected_symptoms]
-
-    for s in symptom_list:
+    for s in selected_symptoms:
         if s in symptom_index:
             input_list[symptom_index[s]] = symptom_severity.get(s.replace("_", " "), 0)
 
     input_df = pd.DataFrame([input_list], columns=symptom_index.keys())
 
-    pred_rf = encoder.classes_[rf_model.predict(input_df)[0]]
-    pred_nb = encoder.classes_[nb_model.predict(input_df)[0]]
-    pred_svm = encoder.classes_[svm_model.predict(input_df)[0]]
+    preds = [
+        encoder.classes_[rf_model.predict(input_df)[0]],
+        encoder.classes_[nb_model.predict(input_df)[0]],
+        encoder.classes_[svm_model.predict(input_df)[0]]
+    ]
 
-    all_preds = [pred_rf, pred_nb, pred_svm]
-    prediction_counts = Counter(all_preds)
-    top_predictions = prediction_counts.most_common(3)
-
+    top_preds = Counter(preds).most_common(3)
     result = []
-    for disease, count in top_predictions:
+    for disease, count in top_preds:
         precautions = precaution_dict.get(disease, ["Not available"] * 4)
-        result.append({
-            "Disease": disease,
-            "Votes": count,
-            "Precautions": precautions
-        })
+        result.append({"Disease": disease, "Votes": count, "Precautions": precautions})
 
     return result
 
-# Prediction button
-if st.button("Predict Disease"):
+# ================== Output =====================
+if st.button("🔍 Predict Disease"):
     if selected_symptoms:
-        with st.spinner("Predicting..."):
+        with st.spinner("Predicting based on selected symptoms..."):
             results = predict_multiple_diseases(selected_symptoms)
-
-        # Display predictions
         for idx, res in enumerate(results):
-            st.subheader(f"Prediction #{idx + 1}: {res['Disease']}")
-            st.write(f"Votes: {res['Votes']} / 3")
-            st.markdown("**Precautions:**")
-            for p in res['Precautions']:
-                st.write(f"- {p}")
+            st.success(f"Prediction #{idx + 1}: {res['Disease']} ({res['Votes']} vote(s))")
+            with st.expander("Precautions"):
+                for p in res['Precautions']:
+                    st.markdown(f"- {p}")
     else:
-        st.warning("Please select at least one symptom!")
+        st.warning("Please select at least one symptom.")
 
 # ================== Footer =====================
-
-# Add Footer
-st.markdown(
-    """
-    ---
-    Made with ❤️ by [Sai Pawar](https://github.com/Saip2503)
-    """
-)
+st.markdown("""
+---
+✅ Made with ❤️ by [Sai Pawar](https://github.com/Saip2503)
+""")
+st.markdown("""
+[![GitHub](https://img.shields.io/badge/GitHub-Profile-black?style=flat&logo=github)](https://github.com/Saip2503)
+""")
